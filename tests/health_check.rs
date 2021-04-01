@@ -2,6 +2,18 @@ use std::net::TcpListener;
 
 use reqwest;
 use tokio;
+
+fn spawn_app() -> String {
+    let listener = TcpListener::bind("localhost:0").expect("Failed to bind listener");
+
+    let port = listener.local_addr().unwrap().port();
+
+    let server = zero2prod::run(listener).expect("Failed to run server");
+
+    let _ = tokio::spawn(server);
+
+    format!("http://localhost:{}", port)
+}
 #[actix_rt::test]
 async fn health_check_works() {
     let addr = spawn_app();
@@ -18,14 +30,46 @@ async fn health_check_works() {
     assert_eq!(Some(0), response.content_length());
 }
 
-fn spawn_app() -> String {
-    let listener = TcpListener::bind("localhost:0").expect("Failed to bind listener");
+#[actix_rt::test]
+async fn subscribe_returns_a_200_for_valid_form_data() {
+    let app_address = spawn_app();
+    let client = reqwest::Client::new();
+    let body = "name=matt%20wilki&email=mattwilki17%40gmail.com";
+    let response = client
+        .post(&format!("{}/subscriptions", &app_address))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .expect("Failed to send request");
 
-    let port = listener.local_addr().unwrap().port();
+    assert_eq!(200, response.status().as_u16());
+}
 
-    let server = zero2prod::run(listener).expect("Failed to run server");
+#[actix_rt::test]
+async fn subscribe_returns_a_400_when_data_is_missing() {
+    let app_address = spawn_app();
+    let client = reqwest::Client::new();
+    let test_cases = vec![
+        ("name=matt%20wilki", "missing email"),
+        ("email=mattwilki17%40gmail.com", "missing name"),
+        ("", "missing name and email"),
+    ];
 
-    let _ = tokio::spawn(server);
+    for (invalid_body, error_message) in test_cases {
+        let response = client
+            .post(&format!("{}/subscriptions", &app_address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(invalid_body)
+            .send()
+            .await
+            .expect("Failed to send request");
 
-    format!("http://localhost:{}", port)
+        assert_eq!(
+            400,
+            response.status().as_u16(),
+            "API did not fail with 400 Bad Request when the payload was {}",
+            error_message
+        );
+    }
 }
