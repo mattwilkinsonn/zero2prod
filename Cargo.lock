@@ -1630,6 +1630,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-aux"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0162d500b846a7b331e583abaaa9c5c63c5777aa515dda3567c410ba243ce8be"
+dependencies = [
+ "chrono",
+ "serde 1.0.125",
+ "serde_json",
+]
+
+[[package]]
 name = "serde-hjson"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2546,6 +2557,7 @@ dependencies = [
  "lazy_static",
  "reqwest",
  "serde 1.0.125",
+ "serde-aux",
  "sqlx",
  "tokio",
  "tracing",
