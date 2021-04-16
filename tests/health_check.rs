@@ -6,6 +6,7 @@ use tokio;
 use uuid::Uuid;
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
+    email_client::EmailClient,
     startup::run,
     telemetry::{get_subscriber, init_subscriber},
 };
@@ -55,7 +56,13 @@ async fn spawn_app() -> TestApp {
     config.database.database_name = Uuid::new_v4().to_string();
     let db_pool = configure_database(&config.database).await;
 
-    let server = run(listener, db_pool.clone()).expect("Failed to run server");
+    let sender_email = config
+        .email_client
+        .sender()
+        .expect("Invalid sender email address");
+    let email_client = EmailClient::new(config.email_client.base_url, sender_email);
+
+    let server = run(listener, db_pool.clone(), email_client).expect("Failed to run server");
 
     let _ = tokio::spawn(server);
 
