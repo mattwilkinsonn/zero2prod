@@ -35,20 +35,17 @@ impl TryInto<NewSubscriber> for FormData {
     }
 }
 
-#[tracing::instrument(name = "Adding a new subscriber", skip(form, pool), fields(email = %form.email, name = %form.name))]
-pub async fn subscribe(
-    form: web::Form<FormData>,
-    pool: web::Data<PgPool>,
-) -> Result<HttpResponse, HttpResponse> {
-    let new_subscriber = form
-        .0
-        .try_into()
-        .map_err(|_| HttpResponse::BadRequest().finish())?;
-
-    insert_subscriber(&pool, &new_subscriber)
-        .await
-        .map_err(|_| HttpResponse::InternalServerError().finish())?;
-    Ok(HttpResponse::Ok().finish())
+#[allow(clippy::async_yields_async)]
+#[tracing::instrument(name = "Adding a new subscriber", skip(form, pool), fields(subscriber_email = %form.email, subscriber_name = %form.name))]
+pub async fn subscribe(form: web::Form<FormData>, pool: web::Data<PgPool>) -> HttpResponse {
+    let new_subscriber = match form.0.try_into() {
+        Ok(form) => form,
+        Err(_) => return HttpResponse::BadRequest().finish(),
+    };
+    match insert_subscriber(&pool, &new_subscriber).await {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(_) => HttpResponse::InternalServerError().finish(),
+    }
 }
 
 #[tracing::instrument(
@@ -61,8 +58,8 @@ pub async fn insert_subscriber(
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "
-        INSERT INTO subscriptions (id, email, name, subscribed_at)
-        VALUES ($1, $2, $3, $4);
+        INSERT INTO subscriptions (id, email, name, subscribed_at, status)
+        VALUES ($1, $2, $3, $4, 'confirmed');
         ",
         Uuid::new_v4(),
         new_subscriber.email.as_ref(),
