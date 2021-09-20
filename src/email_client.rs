@@ -2,7 +2,6 @@ use std::time;
 
 use crate::domain::SubscriberEmail;
 use reqwest::Client;
-use serde;
 
 pub struct EmailClient {
     http_client: Client,
@@ -76,7 +75,6 @@ mod tests {
         lorem::en::{Paragraph, Sentence},
     };
     use fake::{Fake, Faker};
-    use serde_json;
     use wiremock::{
         matchers::{any, header, header_exists, method, path},
         Mock, MockServer, Request, ResponseTemplate,
