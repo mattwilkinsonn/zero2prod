@@ -1,8 +1,8 @@
-use crate::helpers::spawn_app;
+use crate::helpers::TestApp;
 
 #[actix_rt::test]
 async fn health_check_works() {
-    let app = spawn_app().await;
+    let app = TestApp::new().await;
 
     let client = reqwest::Client::new();
 

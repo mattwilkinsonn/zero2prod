@@ -1,5 +1,6 @@
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use uuid::Uuid;
+use wiremock::MockServer;
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
     startup::{get_connection_pool, Application},
@@ -22,9 +23,16 @@ static TRACING: Lazy<()> = Lazy::new(|| {
     }
 });
 
+pub struct ConfirmationLinks {
+    pub html: reqwest::Url,
+    pub plain_text: reqwest::Url,
+}
+
 pub struct TestApp {
     pub address: String,
     pub db_pool: PgPool,
+    pub email_server: MockServer,
+    pub port: u16,
 }
 
 impl TestApp {
@@ -36,6 +44,66 @@ impl TestApp {
             .send()
             .await
             .expect("Failed to send request")
+    }
+
+    pub async fn new() -> Self {
+        Lazy::force(&TRACING);
+
+        // Launch a mock server to stand in for Postmark's API
+        let email_server = MockServer::start().await;
+
+        // Randomise configuration to ensure test isolation
+        let configuration = {
+            let mut c = get_configuration().expect("Failed to read configuration.");
+            // Use a different database for each test case
+            c.database.database_name = Uuid::new_v4().to_string();
+            // Use a random OS port
+            c.application.port = 0;
+            c.email_client.base_url = email_server.uri();
+            c
+        };
+        // Create and migrate the database
+        configure_database(&configuration.database).await;
+        // Launch the application as a background task
+        let application = Application::build(&configuration)
+            .await
+            .expect("Failed to build application");
+
+        let address = format!("http://localhost:{}", application.port());
+
+        let port = application.port();
+
+        let _ = tokio::spawn(application.run_until_stopped());
+        Self {
+            address,
+            db_pool: get_connection_pool(&configuration.database)
+                .await
+                .expect("Failed to connect to Postgres"),
+            email_server,
+            port,
+        }
+    }
+
+    pub fn get_confirmation_links(&self, email_request: &wiremock::Request) -> ConfirmationLinks {
+        let body: serde_json::Value = serde_json::from_slice(&email_request.body).unwrap();
+
+        let get_link = |s: &str| {
+            let links: Vec<_> = linkify::LinkFinder::new()
+                .links(s)
+                .filter(|l| *l.kind() == linkify::LinkKind::Url)
+                .collect();
+            assert_eq!(links.len(), 1);
+            let raw_link = links[0].as_str().to_owned();
+            let mut confirmation_link = reqwest::Url::parse(&raw_link).unwrap();
+            // Let's make sure we don't call random APIs on the web
+            assert_eq!(confirmation_link.host_str().unwrap(), "127.0.0.1");
+            confirmation_link.set_port(Some(self.port)).unwrap();
+            confirmation_link
+        };
+
+        let html = get_link(body["HtmlBody"].as_str().unwrap());
+        let plain_text = get_link(body["TextBody"].as_str().unwrap());
+        ConfirmationLinks { html, plain_text }
     }
 }
 
@@ -59,33 +127,4 @@ pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .expect("Failed to migrate database");
 
     pool
-}
-
-pub async fn spawn_app() -> TestApp {
-    Lazy::force(&TRACING);
-    // Randomise configuration to ensure test isolation
-    let configuration = {
-        let mut c = get_configuration().expect("Failed to read configuration.");
-        // Use a different database for each test case
-        c.database.database_name = Uuid::new_v4().to_string();
-        // Use a random OS port
-        c.application.port = 0;
-        c
-    };
-    // Create and migrate the database
-    configure_database(&configuration.database).await;
-    // Launch the application as a background task
-    let application = Application::build(&configuration)
-        .await
-        .expect("Failed to build application");
-
-    let address = format!("http://localhost:{}", application.port());
-
-    let _ = tokio::spawn(application.run_until_stopped());
-    TestApp {
-        address,
-        db_pool: get_connection_pool(&configuration.database)
-            .await
-            .expect("Failed to connect to Postgres"),
-    }
 }
